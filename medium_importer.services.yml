@@ -1,0 +1,4 @@
+services:
+  medium_importer.http_client:
+    class: GuzzleHttp\Client
+    arguments: ['{ "defaults":{} }']

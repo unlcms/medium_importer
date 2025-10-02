@@ -1,0 +1,12 @@
+name: UNL Medium Importer
+type: module
+description: "Import Medium-exported HTML posts into featured_content nodes and create image media.
+Creates image media for each image, sets the first image to field_featured_content_lead_media
+and inlines subsequent images in the body as drupal-media tags."
+core_version_requirement: ^10
+package: UNL
+dependencies:
+  - drupal:media
+  - drupal:file
+  - drupal:node
+version: 1.0
