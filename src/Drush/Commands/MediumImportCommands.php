@@ -8,6 +8,7 @@ use Drupal\file\Entity\File;
 use Drupal\media\Entity\Media;
 use Drupal\menu_link_content\Entity\MenuLinkContent;
 use Drupal\node\Entity\Node;
+use Drupal\taxonomy\Entity\Term;
 use GuzzleHttp\ClientInterface;
 
 class MediumImportCommands extends DrushCommands {
@@ -167,6 +168,7 @@ class MediumImportCommands extends DrushCommands {
             continue;
           }
           $data = (string) $response->getBody();
+          sleep(2);
         }
         catch (\Exception $e) {
           $this->logger()->warning("HTTP error downloading image: " . $e->getMessage());
@@ -272,6 +274,50 @@ class MediumImportCommands extends DrushCommands {
         $body_html .= $doc->saveHTML($child);
       }
 
+      // Get the tags. They are not included in the .html file so follow the canonical link.
+      $tag_term_ids = [];
+      $canonicalNode = $xpath->query('//a[contains(@class,"p-canonical")]')->item(0);
+      if ($canonicalNode) {
+        $tags = [];
+        $canonicalUrl = $canonicalNode->getAttribute('href');
+        $pageHtml = file_get_contents($canonicalUrl);
+
+        $pageDom = new \DOMDocument();
+        libxml_use_internal_errors(true);
+        $pageDom->loadHTML($pageHtml);
+        libxml_clear_errors();
+
+        $pageXpath = new \DOMXPath($pageDom);
+
+        // Find all <a> tags where href starts with "/tag/".
+        $tagLinks = $pageXpath->query('//a[starts-with(@href, "/tag/")]');
+
+        foreach ($tagLinks as $link) {
+          $tags[] = $link->textContent;
+        }
+        foreach ($tags as $tag_name) {
+          // Check if term exists in the vocabulary.
+          $terms = \Drupal::entityTypeManager()->getStorage('taxonomy_term')->loadByProperties([
+            'name' => $tag_name,
+            'vid' => 'site_organization_tags',
+          ]);
+          if ($terms) {
+            $term = reset($terms);
+          }
+          else {
+            // Term does not exist, create it.
+            $term = Term::create([
+              'name' => $tag_name,
+              'vid' => 'site_organization_tags',
+            ]);
+            $term->save();
+          }
+          $tag_term_ids[] = ['target_id' => $term->id()];
+        }
+      } else {
+        echo "No canonical link found.\n";
+      }
+
       try {
         $node_values = [
           'type' => 'featured_content',
@@ -285,6 +331,7 @@ class MediumImportCommands extends DrushCommands {
             'format' => 'standard',
             'summary' => $summary_text,
           ],
+          's_n_site_organization_tags' => $tag_term_ids,
         ];
 
         if (!empty($media_entities)) {
@@ -309,6 +356,7 @@ class MediumImportCommands extends DrushCommands {
 
       // Log per-file totals.
       $this->logger()->notice("Imported {$file_nodes} node(s) with {$file_images} image(s) from " . basename($file_path));
+      sleep(5);
     }
 
     $this->io()->success("Import complete. Created {$total_nodes} nodes and {$total_images} images in total.");
