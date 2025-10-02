@@ -30,15 +30,19 @@ class MediumImportCommands extends DrushCommands {
    *
    * @command medium_importer:import
    * @aliases medium-import
+   *
    * @param string $dir
    *   Absolute path to directory with .html files exported from Medium.
+   *
    * @option uid The user ID to own created nodes/media/files. Defaults to 1.
+   * @option useragent The User-Agent string to send with httpClient requests.
    * @usage medium_importer:import /var/www/html/medium-export
    *   Import all .html files found in that directory.
    */
-  public function import($dir, $options = ['uid' => 1]) {
+  public function import($dir, $options = ['uid' => 1, 'useragent' => 'DrupalMigrate/1.0 (+https://cms.unl.edu/)']) {
 
     $uid = isset($options['uid']) ? (int) $options['uid'] : 1;
+    $useragent = isset($options['useragent']) ? $options['useragent'] : 'DrupalMigrate/1.0 (+https://cms.unl.edu/)';
 
     if (!is_dir($dir)) {
       $this->logger()->error("Directory not found: {$dir}");
@@ -120,9 +124,12 @@ class MediumImportCommands extends DrushCommands {
         $nodes = $xpath->query('.//' . $tag, $body_node);
         foreach ($nodes as $node) {
           $p = $doc->createElement('p');
+          $strong = $doc->createElement('strong');
+
           foreach (iterator_to_array($node->childNodes) as $child) {
-            $p->appendChild($child->cloneNode(true));
+            $strong->appendChild($child->cloneNode(true));
           }
+          $p->appendChild($strong);
           if ($node->parentNode) {
             $node->parentNode->replaceChild($p, $node);
           }
@@ -162,7 +169,11 @@ class MediumImportCommands extends DrushCommands {
         $this->logger()->notice("Downloading image: {$src}");
 
         try {
-          $response = $this->httpClient->request('GET', $src);
+          $response = $this->httpClient->request('GET', $src, [
+            'headers' => [
+              'User-Agent' => $useragent,
+            ],
+          ]);
           if ($response->getStatusCode() !== 200) {
             $this->logger()->warning("Failed to download image: {$src}");
             continue;
@@ -280,7 +291,23 @@ class MediumImportCommands extends DrushCommands {
       if ($canonicalNode) {
         $tags = [];
         $canonicalUrl = $canonicalNode->getAttribute('href');
-        $pageHtml = file_get_contents($canonicalUrl);
+
+        try {
+          $response = $this->httpClient->request('GET', $canonicalUrl, [
+            'headers' => [
+              'User-Agent' => $useragent,
+            ],
+          ]);
+          if ($response->getStatusCode() !== 200) {
+            $this->logger()->warning("Failed to download canonical link: {$canonicalUrl}");
+            continue;
+          }
+          $pageHtml = (string) $response->getBody();
+        }
+        catch (\Exception $e) {
+          $this->logger()->warning("HTTP error downloading page: " . $e->getMessage());
+          continue;
+        }
 
         $pageDom = new \DOMDocument();
         libxml_use_internal_errors(true);
